@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CPU Scheduler Simulator</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --fg:#1b2430; --muted:#5d6b7c; --line:#d9dfe6; --accent:#0f7b8a; --code:#f1f3f6; --err:#c62f45; --best:#1c8a43; --idle:#e5e9ee; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12171d; --card:#1b222b; --fg:#e8edf3; --muted:#9aa8b8; --line:#2c3743; --accent:#4cc3d3; --code:#10151a; --err:#ff7b8f; --best:#5fd18a; --idle:#262f3a; } }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:860px; margin:0 auto; display:flex; flex-direction:column; gap:12px; }
+  h1 { font-size:1.35rem; margin:0; } h2 { font-size:1rem; margin:0 0 8px; } p { margin:0; color:var(--muted); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; min-width:0; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  select, button, input { font:inherit; padding:8px 10px; border-radius:9px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:600; }
+  @media (prefers-color-scheme: dark) { button.primary { color:#07242a; } }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  th, td { padding:6px 3px; text-align:left; border-bottom:1px solid var(--line); }
+  th { font-size:.74rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600; }
+  td.n, th.n { text-align:right; }
+  .scroll { overflow-x:auto; }
+  #ptable input { width:100%; min-width:46px; text-align:right; padding:6px 8px; }
+  #ptable td:first-child { font-weight:700; white-space:nowrap; }
+  #ptable button { padding:4px 10px; }
+  .dim { opacity:.4; }
+  .chip { display:inline-block; min-width:2.2em; text-align:center; padding:1px 8px; border-radius:6px; color:#fff; font-weight:700; font-size:.85rem; }
+  .gantt { overflow-x:auto; padding:0 16px 4px 0; }
+  .track, .axis { margin-left:16px; }
+  .track { position:relative; height:46px; }
+  .blk { position:absolute; top:0; height:46px; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:.85rem; border-right:1px solid rgba(255,255,255,.55); overflow:hidden; }
+  .blk.idle { background:repeating-linear-gradient(45deg,var(--idle),var(--idle) 6px,transparent 6px,transparent 12px); color:var(--muted); font-weight:400; }
+  .axis { position:relative; height:20px; font-size:.72rem; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .axis span { position:absolute; top:3px; transform:translateX(-50%); }
+  .head { position:absolute; top:-4px; width:2px; background:var(--fg); height:54px; pointer-events:none; }
+  input[type=range] { width:100%; padding:0; border:0; accent-color:var(--accent); }
+  .now { margin-top:6px; min-height:2.8em; }
+  .err { color:var(--err); font-weight:600; }
+  tr.best td { color:var(--best); font-weight:700; } tr.sel td { background:color-mix(in srgb, var(--accent) 14%, transparent); }
+  tr.pick { cursor:pointer; }
+  footer { color:var(--muted); font-size:.82rem; } a { color:var(--accent); }
+  details summary { cursor:pointer; color:var(--accent); font-weight:600; } details p { margin-top:6px; }
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <h1>CPU Scheduler Simulator</h1>
+    <p>A computer has one processor but many programs. The scheduler decides who runs when. Change the processes, pick an algorithm and watch the timeline.</p>
+  </div>
+
+  <section class="card">
+    <h2>1. Processes</h2>
+    <div class="row" style="margin-bottom:8px">
+      <select id="preset" aria-label="Example"></select>
+      <button id="add">Add process</button>
+      <button id="rand">Random</button>
+    </div>
+    <div class="scroll"><table id="ptable"><thead><tr><th>Name</th><th class="n">Arrives</th><th class="n">Burst</th><th class="n" id="prih">Priority</th><th></th></tr></thead><tbody></tbody></table></div>
+    <p style="margin-top:6px;font-size:.82rem">Arrives = when it shows up. Burst = how long it needs the CPU. Priority is used only by the priority algorithms (lower number = more important).</p>
+  </section>
+
+  <section class="card">
+    <h2>2. Algorithm</h2>
+    <div class="row">
+      <select id="algo" aria-label="Algorithm"></select>
+      <label id="qwrap" class="row" style="gap:6px">Quantum <input id="quantum" type="number" inputmode="numeric" min="1" value="4" style="width:5em"></label>
+    </div>
+    <p id="about" style="margin-top:6px;font-size:.9rem"></p>
+  </section>
+
+  <section class="card">
+    <h2>3. Timeline</h2>
+    <div id="msg" class="err" hidden></div>
+    <div id="viz">
+      <div class="gantt" id="gantt"><div class="track" id="track"></div><div class="axis" id="axis"></div></div>
+      <div class="row" style="margin-top:6px"><button id="play">Play</button><input id="slider" type="range" min="0" max="0" value="0" aria-label="Time" style="flex:1;min-width:140px"></div>
+      <div class="now" id="now"></div>
+    </div>
+  </section>
+
+  <section class="card" id="resCard">
+    <h2>Results</h2>
+    <div class="scroll"><table id="res"></table></div>
+    <p style="margin-top:6px;font-size:.82rem">Arr = arrival, End = finish time, Turn = turnaround, Wait = waiting, Resp = response.</p>
+  </section>
+
+  <section class="card" id="cmpCard">
+    <h2>All algorithms on these processes</h2>
+    <div class="scroll"><table id="cmp"></table></div>
+    <p style="margin-top:6px;font-size:.82rem">Averages; lower is better. Swit. = context switches. Green = lowest average waiting time. Tap a row to see that algorithm.</p>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>What do these words mean?</summary>
+      <p><b>Waiting time</b> = time spent in the ready queue (turnaround minus burst). <b>Turnaround</b> = finish minus arrival. <b>Response</b> = first time on the CPU minus arrival. <b>Context switch</b> = the CPU moves straight from one process to a different one. <b>Quantum</b> = how long Round Robin lets a process run before the next one gets a turn.</p>
+    </details>
+  </section>
+
+  <footer>Source and tests: <a href="https://github.com/Paraskevas7/cpu-scheduler-simulator">github.com/Paraskevas7/cpu-scheduler-simulator</a>. Runs entirely in your browser.</footer>
+</main>
+<script src="scheduler.js"></script>
+<script>
+(function () {
+  var S = Scheduler, $ = function (id) { return document.getElementById(id); };
+  var ABOUT = {
+    fcfs: 'Runs processes in the order they arrive. Simple and fair, but one long job can make everyone wait (the "convoy effect").',
+    sjf: 'Picks the shortest job when the CPU is free. Never interrupts a running process.',
+    srtf: 'Like SJF, but a newly arrived short job can interrupt the running one. It gives the lowest average waiting time of all.',
+    priority: 'Picks the most important process (lowest number) when the CPU is free. Low-priority jobs can starve.',
+    'priority-p': 'Like priority, but a more important process that arrives interrupts the running one.',
+    rr: 'Everyone gets a turn of at most one quantum, then goes to the back of the queue. Good response time, more context switches.'
+  };
+  var PRESETS = {
+    four: ['Four processes (textbook)', [[0, 8, 2], [1, 4, 1], [2, 9, 3], [3, 5, 2]]],
+    convoy: ['Convoy effect (one long job first)', [[0, 24, 3], [0, 3, 1], [0, 3, 2]]],
+    prio: ['Priorities', [[0, 10, 3], [0, 1, 1], [0, 2, 4], [0, 1, 5], [0, 5, 2]]],
+    gap: ['CPU sits idle at first', [[3, 4, 1], [5, 2, 2], [12, 3, 1]]]
+  };
+  var procs = [], algo = 'srtf', t = 0, result = null, timer = null;
+
+  Object.keys(PRESETS).forEach(function (k) { var o = document.createElement('option'); o.value = k; o.textContent = PRESETS[k][0]; $('preset').appendChild(o); });
+  Object.keys(S.ALGORITHMS).forEach(function (k) { var o = document.createElement('option'); o.value = k; o.textContent = S.ALGORITHMS[k].name; $('algo').appendChild(o); });
+  $('algo').value = algo;
+
+  function color(pid) {
+    var i = procs.findIndex(function (p) { return p.pid === pid; });
+    return 'hsl(' + ((i * 67 + 200) % 360) + ',55%,42%)';
+  }
+  function chip(pid) { return '<span class="chip" style="background:' + color(pid) + '">' + pid + '</span>'; }
+  function load(rows) { procs = rows.map(function (r, i) { return { pid: 'P' + (i + 1), arrival: r[0], burst: r[1], priority: r[2] }; }); renderTable(); run(); }
+
+  function renderTable() {
+    var tb = $('ptable').tBodies[0]; tb.innerHTML = '';
+    var usesPrio = algo === 'priority' || algo === 'priority-p';
+    $('prih').className = 'n' + (usesPrio ? '' : ' dim');
+    procs.forEach(function (p, i) {
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + chip(p.pid) + '</td>';
+      ['arrival', 'burst', 'priority'].forEach(function (f) {
+        var td = document.createElement('td'); if (f === 'priority' && !usesPrio) td.className = 'dim';
+        var inp = document.createElement('input'); inp.type = 'number'; inp.inputMode = 'numeric'; inp.value = p[f]; inp.setAttribute('aria-label', p.pid + ' ' + f);
+        inp.oninput = function () { p[f] = inp.value === '' ? NaN : parseInt(inp.value, 10); run(); };
+        td.appendChild(inp); tr.appendChild(td);
+      });
+      var td = document.createElement('td'); var b = document.createElement('button'); b.textContent = '×'; b.setAttribute('aria-label', 'remove ' + p.pid);
+      b.onclick = function () { procs.splice(i, 1); procs.forEach(function (q, j) { q.pid = 'P' + (j + 1); }); renderTable(); run(); };
+      td.appendChild(b); tr.appendChild(td); tb.appendChild(tr);
+    });
+  }
+
+  function fmt(x) { return (Math.round(x * 100) / 100).toString(); }
+
+  function run() {
+    stop();
+    var quantum = parseInt($('quantum').value, 10);
+    $('qwrap').hidden = algo !== 'rr';
+    $('about').textContent = ABOUT[algo];
+    try {
+      result = S.simulate(procs, algo, { quantum: quantum });
+    } catch (e) {
+      result = null; $('msg').hidden = false; $('msg').textContent = e.message; $('viz').hidden = true; $('resCard').hidden = true; $('cmpCard').hidden = true; return;
+    }
+    $('msg').hidden = true; $('viz').hidden = false; $('resCard').hidden = false; $('cmpCard').hidden = false;
+    t = result.totalTime; $('slider').max = result.totalTime; $('slider').value = t;
+    drawGantt(); drawNow(); drawResults(quantum);
+  }
+
+  function drawGantt() {
+    var W = $('gantt').clientWidth || 300, total = result.totalTime;
+    var unit = Math.max(10, Math.min(40, Math.floor((W - 32) / total)));
+    var track = $('track'), axis = $('axis'); track.innerHTML = ''; axis.innerHTML = '';
+    track.style.width = axis.style.width = (unit * total) + 'px';
+    var lastX = -100;
+    result.segments.forEach(function (s) {
+      var d = document.createElement('div'); d.className = 'blk' + (s.pid === null ? ' idle' : '');
+      d.style.left = (s.start * unit) + 'px'; d.style.width = ((s.end - s.start) * unit) + 'px';
+      if (s.pid !== null) d.style.background = color(s.pid);
+      d.textContent = (s.end - s.start) * unit >= 26 ? (s.pid === null ? 'idle' : s.pid) : '';
+      track.appendChild(d);
+      if (s.start * unit - lastX >= 22) { var sp = document.createElement('span'); sp.style.left = (s.start * unit) + 'px'; sp.textContent = s.start; axis.appendChild(sp); lastX = s.start * unit; }
+    });
+    var e = document.createElement('span'); e.style.left = (total * unit) + 'px'; e.textContent = total; axis.appendChild(e);
+    var head = document.createElement('div'); head.className = 'head'; head.id = 'head'; track.appendChild(head);
+    head.style.left = (t * unit) + 'px'; head.dataset.unit = unit;
+  }
+
+  function drawNow() {
+    var head = $('head'); if (head) head.style.left = (t * head.dataset.unit) + 'px';
+    var el = $('now');
+    if (t >= result.totalTime) { el.innerHTML = 'Time ' + t + ': <b>all processes finished.</b>'; return; }
+    var tk = result.trace[t];
+    var running = tk.running === null ? 'CPU idle' : 'running ' + chip(tk.running) + ' (' + tk.remaining[tk.running] + ' left)';
+    var ready = tk.ready.length ? tk.ready.map(function (p) { return chip(p) + '<small> ' + tk.remaining[p] + ' left</small>'; }).join(' ') : 'nobody';
+    el.innerHTML = 'Time ' + t + ': ' + running + '<br>Waiting in line: ' + ready;
+  }
+
+  function drawResults(quantum) {
+    var h = '<thead><tr><th>Proc</th><th class="n">Arr</th><th class="n">Burst</th><th class="n">End</th><th class="n">Turn</th><th class="n">Wait</th><th class="n">Resp</th></tr></thead><tbody>';
+    result.processes.forEach(function (p) {
+      h += '<tr><td>' + chip(p.pid) + '</td><td class="n">' + p.arrival + '</td><td class="n">' + p.burst + '</td><td class="n">' + p.completion + '</td><td class="n">' + p.turnaround + '</td><td class="n">' + p.waiting + '</td><td class="n">' + p.response + '</td></tr>';
+    });
+    var a = result.averages;
+    h += '<tr><td><b>Average</b></td><td></td><td></td><td></td><td class="n"><b>' + fmt(a.turnaround) + '</b></td><td class="n"><b>' + fmt(a.waiting) + '</b></td><td class="n"><b>' + fmt(a.response) + '</b></td></tr></tbody>';
+    $('res').innerHTML = h;
+
+    var all = S.compareAll(procs, quantum), keys = Object.keys(all);
+    var best = Math.min.apply(null, keys.map(function (k) { return all[k].averages.waiting; }));
+    var c = '<thead><tr><th>Algorithm</th><th class="n">Wait</th><th class="n">Turn</th><th class="n">Resp</th><th class="n">Swit.</th></tr></thead><tbody>';
+    keys.forEach(function (k) {
+      var r = all[k], cls = 'pick' + (r.averages.waiting - best < 1e-9 ? ' best' : '') + (k === algo ? ' sel' : '');
+      c += '<tr class="' + cls + '" data-algo="' + k + '"><td>' + S.ALGORITHMS[k].name + '</td><td class="n">' + fmt(r.averages.waiting) + '</td><td class="n">' + fmt(r.averages.turnaround) + '</td><td class="n">' + fmt(r.averages.response) + '</td><td class="n">' + r.contextSwitches + '</td></tr>';
+    });
+    $('cmp').innerHTML = c + '</tbody>';
+    Array.prototype.forEach.call($('cmp').querySelectorAll('tr.pick'), function (tr) {
+      tr.onclick = function () { algo = tr.dataset.algo; $('algo').value = algo; renderTable(); run(); };
+    });
+  }
+
+  function stop() { if (timer) { clearInterval(timer); timer = null; } $('play').textContent = 'Play'; }
+  $('play').onclick = function () {
+    if (!result) return;
+    if (timer) { stop(); return; }
+    if (t >= result.totalTime) t = 0;
+    $('play').textContent = 'Pause';
+    timer = setInterval(function () {
+      t++; $('slider').value = t; drawNow();
+      if (t >= result.totalTime) stop();
+    }, 350);
+    $('slider').value = t; drawNow();
+  };
+  $('slider').oninput = function () { stop(); t = parseInt($('slider').value, 10); drawNow(); };
+  $('algo').onchange = function () { algo = $('algo').value; renderTable(); run(); };
+  $('quantum').oninput = run;
+  $('preset').onchange = function () { load(PRESETS[$('preset').value][1]); };
+  $('add').onclick = function () { if (procs.length >= 20) return; procs.push({ pid: 'P' + (procs.length + 1), arrival: 0, burst: 3, priority: 1 }); renderTable(); run(); };
+  $('rand').onclick = function () {
+    var rows = []; for (var i = 0; i < 5; i++) rows.push([Math.floor(Math.random() * 10), 1 + Math.floor(Math.random() * 9), 1 + Math.floor(Math.random() * 5)]);
+    load(rows);
+  };
+  window.addEventListener('resize', function () { if (result) { drawGantt(); drawNow(); } });
+  load(PRESETS.four[1]);
+})();
+</script>
+</body>
+</html>

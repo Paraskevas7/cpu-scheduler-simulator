@@ -1,0 +1,7 @@
+{
+  "name": "cpu-scheduler-simulator",
+  "version": "0.1.0",
+  "description": "Simulates CPU scheduling algorithms (FCFS, SJF, SRTF, priority, round robin) with a Gantt chart and metrics",
+  "license": "MIT",
+  "scripts": { "test": "node --test test/*.test.js", "build": "node tools/build.js" }
+}
